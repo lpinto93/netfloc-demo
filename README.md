@@ -1,4 +1,4 @@
-#Service Funciton Chaining Demo using Netfloc, netfloc-heat and T-Nova VNFs
+#Service Function Chaining Demo using Netfloc, netfloc-heat and T-Nova VNFs
 
 ## Scenario
 User1 sends traffic to user2. The 2 users are connected with a switch (Pica8 bridge). On the same switch there is a NFVI-PoP (OpenStack Cloud). At the beginning the traffic is directly from user1 to user2. That traffic is random and the only specific thing is a UDP video stream at port 33334. Then the WICM, that is in the control of the Pica8 switch, redirects the traffic to the NFVI-PoP. In there netfloc has some chains already established. The traffic goes to vTC eth1. If it is the udp video stream (the distinction is port based, on port 33334) the vTC sends it to eth3 to be forwarded towards the vMT. vMT transcodes the video stream and adds a watermark. All other traffic is sent to eth2 and then towards the vTC-f. Both of these chains arrive then at user2. After this the WICM stops the redirection towards the PoP so the traffic goes again directly from user1 to user2.
@@ -239,10 +239,12 @@ ffmpeg -re -i big_buck_bunny_720p_surround.avi -vcodec mpeg4 -an -b 1024k -s 640
 
 #### vMT Flow (1) 
 
-* Send the video stream from User1, and run from inside the vMT: ```tcpdump –i eth1 –nvve```* Get the source mac of the udp packets, remember it (for example ```02:12:ff:ff:ff:ff```) and modify it to ```02:12:00:00:00:00```
+* Send the video stream from User1, and run from inside the vMT: ```tcpdump –i eth1 –nvve```
+* Get the source mac of the udp packets, remember it (for example ```02:12:ff:ff:ff:ff```) and modify it to ```02:12:00:00:00:00```
 * Find in the Controller the ```vMT_in_port``` number inside ```/port_mappings/control_port_mappings```. The port we need is the one that corresponds to```vMT_eth0_port``` and it is usually one number lower than the ```vMT_in_port```, which corresponds to the eth1 interface of that VM.
 * Run ```ovs-ofctl dump-flows br-int | grep "priority=20,in_port=1"``` to find the following rule: ```priority=20,in_port=1,dl_dst=02:00:00:00:00:00/ff:ff:00:00:00:00 actions=output:<vMT_in_port>```
-* According to this, create the following rule: ```ovs-ofctl add-flow br-int priority=21,in_port=1,dl_dst=02:00:00:00:00:00/ff:ff:00:00:00:00,actions=strip_vlan,mod_dl_dst:<vMT eth0 mac>,mod_nw_dst:<vMT eth0 IP>,mod_nw_tos:4,output:<vMT eth0 port>```
+* According to this, create the following rule: ```
+ovs-ofctl add-flow br-int priority=21,in_port=1,dl_dst=02:00:00:00:00:00/ff:ff:00:00:00:00,actions=strip_vlan,mod_dl_dst:<vMT eth0 mac>,mod_nw_dst:<vMT eth0 IP>,mod_nw_tos:4,output:<vMT eth0 port>```
 * The final rule looks like this:
 ```ovs-ofctl add-flow br-int priority=21,in_port=1,dl_dst=02:00:00:00:00:00/ff:ff:00:00:00:00,actions=strip_vlan,mod_dl_dst:fa:16:3e:21:41:e0,mod_nw_dst:13.13.13.4,mod_nw_tos:4,output:933```
 
@@ -251,7 +253,8 @@ ffmpeg -re -i big_buck_bunny_720p_surround.avi -vcodec mpeg4 -an -b 1024k -s 640
 * Search the mac address you remembered in the previous command (02:12:00:00:00:00) on the Control node (running the vMT VNF):
 
 ```ovs-ofctl dump-flows br-int | grep 02:12:00:00:00:00```. Normally only one flow should appear as output, for example:
-```
+
+```
 priority=20,in_port=935,dl_src=02:12:00:00:00:00/ff:ff:00:00:00:00,dl_dst=02:00:00:00:00:0,actions=mod_dl_src:00:90:27:22:d2:68,mod_dl_dst:b8:ae:ed:77:73:bc,output:937
 ```
 Port 937 corresponds to ***vSF\_in\_port***.
@@ -259,9 +262,11 @@ Port 937 corresponds to ***vSF\_in\_port***.
 * You need to take the actions from that flow. Add 2 more actions and mach it accordingly to create the following flow rule: 
 
 ```ovs-ofctl add-flow br-int priority=21,in_port=<vMT eth0 port>,dl_type=0x0800,nw_proto=17,nw_src=<vMT eth0 IP>,nw_dst=10.50.0.2,dl_src=<vMT eth0 mac>,dl_dst=<GET PACKET DST MAC FROM TCPDUMP ETH0 IN vMT>,actions=mod_vlan_vid:401,mod_nw_src=10.50.0.1,mod_dl_src:00:90:27:22:d2:68,mod_dl_dst:b8:ae:ed:77:73:bc,output:937```
-* The final rule looks like this: 
 
-```ovs-ofctl add-flow br-int priority=21,in_port=769,dl_type=0x0800,nw_proto=17,nw_src=13.13.13.5,nw_dst=10.50.0.2,dl_src=fa:16:3e:58:9a:84,dl_dst=fa:16:3e:21:f8:8d,actions=mod_vlan_vid:401,mod_nw_src=10.50.0.1,mod_dl_src:00:90:27:22:d2:68,mod_dl_dst:b8:ae:ed:77:73:bc,output:937```
+* The final rule looks like this: 
+
+```ovs-ofctl add-flow br-int priority=21,in_port=769,dl_type=0x0800,nw_proto=17,nw_src=13.13.13.5,nw_dst=10.50.0.2,dl_src=fa:16:3e:58:9a:84,dl_dst=fa:16:3e:21:f8:8d,actions=mod_vlan_vid:401,mod_nw_src=10.50.0.1,mod_dl_src:00:90:27:22:d2:68,mod_dl_dst:b8:ae:ed:77:73:bc,output:937```
+
 * After the flows are installed, run the following command in the vMT to start the transcoding:
 
 ```
@@ -277,7 +282,8 @@ ffmpeg -re -i udp:13.13.13.5:33334 -i watermark_tnova_logo.jpg -filter_complex "
 * To see video in User2 (10.50.0.2), connect with Teamviewer. Run the ffplayer and the video shloud appear with the watermark on it:
 
 ```
-ffplay udp://10.50.0.2:33334```
+ffplay udp://10.50.0.2:33334
+```
 * The UDP packets can be captured on User2 on the following interface:```tcpdump -i eth0.100 udp```.
 
 ## Video with and w/o watermark
@@ -285,7 +291,12 @@ ffplay udp://10.50.0.2:33334```
 * WICM component is used to make redirection of the flows to the SFC PoP. When redirection is enabled the video is shown with watermark.
 
 * WICM redirection: REST calls are needed here. They are currently done using cURL. To view the existing redirections run:
-```curl http://10.30.0.12:12891/vnf-connectivity```* To enable the redirection search the last ```$ns_instance_id``` and replace it with new (```$ns_instance_id``` must be unique for each redirection). Then run the following to allocate vnlan_ids for the redirection:```
+
+```curl http://10.30.0.12:12891/vnf-connectivity```
+
+* To enable the redirection search the last ```$ns_instance_id``` and replace it with new (```$ns_instance_id``` must be unique for each redirection). Then run the following to allocate vnlan_ids for the redirection:
+
+```
 localadmin@control:~$ curl -X  POST -H "Content-Type: application/json" -H "Cache-Control: no-cache" -d '{"service":{"ns_instance_id":"1","client_mkt_id":"1","nap_mkt_id":"1","nfvi_mkt_id":"1"}}' http://10.30.0.12:12891/vnf-connectivity
 {
   "allocated": {
@@ -299,12 +310,18 @@ localadmin@control:~$ curl -X  POST -H "Content-Type: application/json" -H "Cach
       "vlan_id": 401
     }
   }
-```* To activte the redirection run:```
+```
+* To activte the redirection run:
+
+```
 localadmin@control:~$ curl -X PUT http://10.30.0.12:12891/vnf-connectivity/1
 {
   "activated": {
     "ns_instance_id": "1"
   }
-```* To disable the redirection and with this, the chain & video transcoding, run:
+```
+* To disable the redirection and with this, the chain & video transcoding, run:
 
-```curl -X DELETE http://10.30.0.12:12891/vnf-connectivity/$ns_instance_id```
+```
+curl -X DELETE http://10.30.0.12:12891/vnf-connectivity/$ns_instance_id
+```
